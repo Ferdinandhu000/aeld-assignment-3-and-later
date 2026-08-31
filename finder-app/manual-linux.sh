@@ -26,6 +26,29 @@ if [ "$(id -u)" -ne 0 ] && command -v sudo >/dev/null 2>&1 && sudo -n true 2>/de
     SUDO="sudo -n"
 fi
 
+# Git servers occasionally terminate long HTTPS transfers on the self-hosted
+# runner.  Retry cleanly with HTTP/1.1 so a partial clone is never reused.
+clone_release() {
+    local url="$1"
+    local ref="$2"
+    local destination="$3"
+    local attempt
+
+    for attempt in 1 2 3; do
+        rm -rf "${destination}"
+        echo "Cloning ${url} (${ref}), attempt ${attempt}/3"
+        if git -c http.version=HTTP/1.1 clone "${url}" \
+            --depth 1 --single-branch --branch "${ref}" "${destination}"; then
+            return 0
+        fi
+        echo "Clone attempt ${attempt} failed; retrying..." >&2
+        sleep 5
+    done
+
+    echo "Unable to clone ${url} after 3 attempts" >&2
+    return 1
+}
+
 if [ $# -lt 1 ]
 then
     echo "Using default directory ${OUTDIR} for output"
@@ -37,9 +60,10 @@ fi
 mkdir -p ${OUTDIR}
 
 cd "$OUTDIR"
-if [ ! -d "${OUTDIR}/linux-stable" ]; then
+if [ ! -d "${OUTDIR}/linux-stable/.git" ] || \
+   ! git -C "${OUTDIR}/linux-stable" rev-parse --verify "${KERNEL_VERSION}^{commit}" >/dev/null 2>&1; then
     echo "CLONING GIT LINUX STABLE VERSION ${KERNEL_VERSION} IN ${OUTDIR}"
-    git clone ${KERNEL_REPO} --depth 1 --single-branch --branch ${KERNEL_VERSION} linux-stable
+    clone_release "${KERNEL_REPO}" "${KERNEL_VERSION}" "${OUTDIR}/linux-stable"
 fi
 
 if [ ! -e ${OUTDIR}/Image ]; then
@@ -84,14 +108,12 @@ mkdir -p home/conf conf
 
 # 2. 编译并安装 Busybox
 cd "$OUTDIR"
-if [ ! -d "${OUTDIR}/busybox" ] || \
-   ! git -C "${OUTDIR}/busybox" rev-parse --verify "refs/tags/${BUSYBOX_VERSION}" >/dev/null 2>&1
+if [ ! -d "${OUTDIR}/busybox/.git" ] || \
+   ! git -C "${OUTDIR}/busybox" rev-parse --verify "${BUSYBOX_VERSION}^{commit}" >/dev/null 2>&1
 then
-    rm -rf "${OUTDIR}/busybox"
     # Only the pinned release is needed; cloning the full BusyBox history can
     # leave the self-hosted runner processing hundreds of thousands of objects.
-    git clone https://git.busybox.net/busybox.git \
-        --depth 1 --single-branch --branch ${BUSYBOX_VERSION} busybox
+    clone_release "https://git.busybox.net/busybox.git" "${BUSYBOX_VERSION}" "${OUTDIR}/busybox"
     cd busybox
     git checkout ${BUSYBOX_VERSION}
     make distclean
