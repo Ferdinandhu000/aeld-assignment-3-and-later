@@ -84,9 +84,14 @@ mkdir -p home/conf conf
 
 # 2. 编译并安装 Busybox
 cd "$OUTDIR"
-if [ ! -d "${OUTDIR}/busybox" ]
+if [ ! -d "${OUTDIR}/busybox" ] || \
+   ! git -C "${OUTDIR}/busybox" rev-parse --verify "refs/tags/${BUSYBOX_VERSION}" >/dev/null 2>&1
 then
-    git clone https://git.busybox.net/busybox.git
+    rm -rf "${OUTDIR}/busybox"
+    # Only the pinned release is needed; cloning the full BusyBox history can
+    # leave the self-hosted runner processing hundreds of thousands of objects.
+    git clone https://git.busybox.net/busybox.git \
+        --depth 1 --single-branch --branch ${BUSYBOX_VERSION} busybox
     cd busybox
     git checkout ${BUSYBOX_VERSION}
     make distclean
