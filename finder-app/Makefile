@@ -1,4 +1,9 @@
-CC ?= $(CROSS_COMPILE)gcc
+# GNU make supplies a built-in default of `cc`, which would otherwise prevent
+# `CC ?=` from honoring CROSS_COMPILE.  Respect an explicitly supplied CC while
+# selecting the cross compiler for cross builds.
+ifeq ($(origin CC),default)
+CC = $(if $(CROSS_COMPILE),$(CROSS_COMPILE)gcc,cc)
+endif
 CFLAGS ?= -Wall -Werror -g
 
 .PHONY: all default clean
